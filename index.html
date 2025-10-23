@@ -1,0 +1,877 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ScheduleMaster — Responsive Calendar & Notification System</title>
+
+<!--
+ScheduleMaster - Single-file implementation
+Features:
+- Monthly calendar with prev/next/today navigation
+- Click a day to prefill the event form
+- Event creation with title, date, start/end times, description
+- Events persisted in localStorage
+- Upcoming events list (chronological)
+- Time-based notifications: checks every minute; alerts 10 minutes before event
+- Slide-in notification panel with auto-dismiss after 5s & manual close
+- Responsive (mobile-first), breakpoints for tablet & desktop
+- No external dependencies (icons are inline SVG)
+- Uses CSS Grid/Flexbox and CSS variables for theme
+- 12-hour time formatting for display
+-->
+
+<style>
+  :root{
+    --primary:#4361ee; /* Professional blue */
+    --secondary:#7209b7; /* Accent purple */
+    --success:#4cc9f0; /* Notification blue */
+    --warning:#f72585; /* Alert pink */
+    --bg:#f5f7fb;
+    --card:#ffffff;
+    --muted:#9aa4bb;
+    --accent-contrast:#ffffff;
+    --shadow: 0 6px 18px rgba(15,23,42,0.06);
+    --radius:12px;
+    --font-stack:"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* Mobile-first layout */
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family:var(--font-stack);
+    background:linear-gradient(180deg, var(--bg), #ffffff);
+    color:#0f1724;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    line-height:1.35;
+    padding:16px;
+  }
+
+  .app{
+    max-width:1100px;
+    margin:0 auto;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+  }
+
+  header.app-header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    justify-content:space-between;
+  }
+
+  .brand{
+    display:flex;
+    gap:12px;
+    align-items:center;
+  }
+  .logo{
+    width:44px;height:44px;border-radius:10px;
+    background:linear-gradient(135deg,var(--primary),var(--secondary));
+    display:flex;align-items:center;justify-content:center;color:var(--accent-contrast);
+    font-weight:700;box-shadow:var(--shadow);
+  }
+  .brand h1{font-size:18px;margin:0}
+  .brand p{margin:0;font-size:12px;color:var(--muted)}
+
+  .header-actions{display:flex;gap:8px;align-items:center;}
+  .btn{
+    display:inline-flex;gap:8px;align-items:center;padding:8px 12px;border-radius:10px;
+    background:var(--card);border:1px solid rgba(15,23,42,0.06);cursor:pointer;font-weight:600;
+    box-shadow:var(--shadow);
+  }
+  .btn.primary{background:var(--primary);color:var(--accent-contrast);border:none}
+  .btn.ghost{background:transparent;border:1px solid rgba(15,23,42,0.06)}
+
+  /* Main layout: calendar + sidebar form/list */
+  .main{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:16px;
+  }
+
+  .card{
+    background:var(--card);padding:14px;border-radius:var(--radius);box-shadow:var(--shadow);
+  }
+
+  /* Calendar header controls */
+  .calendar-top{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;
+  }
+  .month-title{font-size:18px;font-weight:700;display:flex;gap:12px;align-items:center}
+  .nav-controls{display:flex;gap:8px;align-items:center}
+
+  /* Weekday labels */
+  .weekday-row{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:6px;
+    color:var(--muted);
+    font-size:13px;
+    margin-bottom:8px;
+    text-align:center;
+  }
+
+  /* Calendar grid */
+  .calendar-grid{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:8px;
+  }
+  .day {
+    min-height:80px;
+    border-radius:10px;
+    padding:8px;
+    position:relative;
+    background:linear-gradient(180deg,transparent,transparent);
+    cursor:pointer;
+    display:flex;flex-direction:column;justify-content:flex-start;
+    transition:transform .12s ease, box-shadow .12s ease;
+    border:1px solid rgba(15,23,42,0.03);
+  }
+  .day:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(15,23,42,0.06)}
+  .muted-day{color:rgba(15,23,42,0.28);background:transparent}
+  .today{
+    outline:3px solid rgba(67,97,238,0.12);
+    box-shadow:inset 0 -3px 0 rgba(67,97,238,0.05);
+  }
+  .date-num{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .markers{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .event-badge{
+    background:linear-gradient(90deg,var(--primary),var(--secondary));
+    color:var(--accent-contrast);padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;
+    box-shadow:0 6px 12px rgba(67,97,238,0.08)
+  }
+  .event-count{
+    margin-left:auto;background:rgba(15,23,42,0.06);padding:2px 8px;border-radius:999px;font-size:12px;
+    color:var(--muted)
+  }
+
+  /* Selected day highlighting */
+  .day.selected{background:linear-gradient(180deg,rgba(67,97,238,0.03),transparent);border-color:rgba(67,97,238,0.12)}
+
+  /* Sidebar form & upcoming events */
+  .sidebar{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+
+  form.event-form{display:flex;flex-direction:column;gap:8px;}
+  .field{display:flex;flex-direction:column;gap:6px}
+  label{font-size:13px;color:var(--muted)}
+  input[type="text"], input[type="date"], input[type="time"], textarea, select{
+    padding:10px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);font-size:14px;background:transparent;
+  }
+  textarea{min-height:84px;resize:vertical;padding-top:10px}
+  .row{display:flex;gap:8px}
+  .row .field{flex:1}
+
+  .event-list{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto;padding-right:6px}
+  .event-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:10px;border:1px solid rgba(15,23,42,0.03)}
+  .event-meta{display:flex;flex-direction:column;gap:6px}
+  .event-time{font-weight:700;color:var(--primary)}
+  .event-title{font-weight:700}
+  .event-desc{color:var(--muted);font-size:13px}
+
+  /* Notification panel (slide-in) */
+  .notifications{
+    position:fixed;
+    z-index:1200;
+    right:16px;
+    bottom:16px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    max-width:320px;
+    pointer-events:none;
+  }
+  .toast{
+    pointer-events:auto;
+    background:linear-gradient(180deg,var(--card),#fff);
+    border-radius:12px;padding:12px;border:1px solid rgba(15,23,42,0.06);
+    box-shadow:0 12px 30px rgba(15,23,42,0.12);
+    transform:translateY(20px) scale(.98);
+    opacity:0;transition:transform .25s cubic-bezier(.2,.9,.2,1),opacity .25s;
+    display:flex;gap:10px;align-items:flex-start;
+  }
+  .toast.show{transform:none;opacity:1}
+  .toast .left{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
+  .toast .right{flex:1}
+  .toast .close{cursor:pointer;border-radius:8px;border:none;background:transparent;padding:6px;color:var(--muted)}
+  .toast .title{font-weight:800}
+  .toast small{color:var(--muted)}
+
+  /* Responsive: tablet and desktop */
+  @media(min-width:576px){
+    .main{grid-template-columns: 1fr 360px;}
+    .sidebar{grid-template-columns:1fr}
+    .calendar-grid .day{min-height:96px}
+  }
+  @media(min-width:992px){
+    body{padding:28px}
+    .brand h1{font-size:20px}
+    .calendar-grid .day{min-height:120px}
+    .notifications{right:28px;bottom:28px;max-width:380px}
+  }
+
+  /* tiny utility */
+  .muted{color:var(--muted);font-size:13px}
+  .flex{display:flex;align-items:center;gap:8px}
+  .small{font-size:13px}
+  .hidden{display:none}
+  .form-actions{display:flex;gap:8px;justify-content:flex-end}
+  .pill{padding:6px 10px;border-radius:999px;background:rgba(15,23,42,0.03);font-weight:700;font-size:13px}
+</style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo">SM</div>
+        <div>
+          <h1>ScheduleMaster</h1>
+          <p>Responsive calendar • Notifications • localStorage</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="pill small muted">Mobile • Tablet • Desktop</div>
+        <button class="btn primary" id="todayBtn" title="Go to today">Today</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Calendar Card -->
+      <section class="card" aria-labelledby="calendarTitle">
+        <div class="calendar-top">
+          <div class="month-title" id="calendarTitle">
+            <div id="monthLabel"></div>
+            <div class="muted small" id="yearLabel"></div>
+          </div>
+          <div class="nav-controls">
+            <button class="btn ghost" id="prevMonthBtn" title="Previous month">&larr;</button>
+            <button class="btn ghost" id="nextMonthBtn" title="Next month">&rarr;</button>
+          </div>
+        </div>
+
+        <div class="weekday-row" id="weekdayRow" aria-hidden="true">
+          <!-- Weekday labels filled by JS -->
+        </div>
+
+        <div class="calendar-grid" id="calendarGrid" role="grid">
+          <!-- Days injected by JS -->
+        </div>
+      </section>
+
+      <!-- Sidebar: Event form + upcoming events -->
+      <aside class="sidebar">
+        <div class="card">
+          <h3 style="margin:0 0 8px 0">Add / Edit Event</h3>
+
+          <form id="eventForm" class="event-form" autocomplete="off">
+            <input type="hidden" id="eventId" />
+            <div class="field">
+              <label for="title">Event title *</label>
+              <input id="title" type="text" placeholder="Meeting with team" required />
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label for="date">Date *</label>
+                <input id="date" type="date" required />
+              </div>
+              <div class="field">
+                <label for="startTime">Start *</label>
+                <input id="startTime" type="time" required />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label for="endTime">End *</label>
+                <input id="endTime" type="time" required />
+              </div>
+              <div class="field">
+                <label for="reminder">Reminder</label>
+                <select id="reminder">
+                  <option value="10" selected>10 minutes before</option>
+                  <option value="5">5 minutes before</option>
+                  <option value="15">15 minutes before</option>
+                  <option value="0">At start time</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="description">Description</label>
+              <textarea id="description" placeholder="Optional details..."></textarea>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="btn" id="clearBtn">Clear</button>
+              <button type="submit" class="btn primary" id="saveBtn">Save Event</button>
+            </div>
+            <p class="muted small" style="margin:6px 0 0 0">* Required fields — times are local and displayed in 12-hour format.</p>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 8px 0">Upcoming Events</h3>
+          <div class="event-list" id="upcomingList" aria-live="polite">
+            <!-- upcoming events injected -->
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Notification container -->
+  <div class="notifications" id="notifications" aria-live="assertive" aria-atomic="true"></div>
+
+<script>
+/*
+ScheduleMaster main JS
+- Handles calendar rendering, event CRUD, localStorage, notifications
+- Comments inline for maintainability
+*/
+
+// --------- Storage keys & helpers ----------
+const STORAGE_KEY = 'schedulemaster_events_v1';
+const NOTIFIED_KEY = 'schedulemaster_notified_v1'; // store notified event ids to avoid duplicates
+
+function loadEvents(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){
+    console.error('Failed to parse events from storage', e);
+    return [];
+  }
+}
+function saveEvents(events){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+}
+function loadNotified(){
+  try{
+    const raw = localStorage.getItem(NOTIFIED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }catch(e){
+    return [];
+  }
+}
+function saveNotified(arr){
+  localStorage.setItem(NOTIFIED_KEY, JSON.stringify(arr || []));
+}
+
+// ---------- Date helpers ----------
+const WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function pad(n){return n.toString().padStart(2,'0');}
+function ymdToDate(ymd, time24){
+  // ymd: "YYYY-MM-DD", time24: "HH:MM" (24h). returns JS Date in local tz
+  const [y,m,d] = String(ymd).split('-').map(Number);
+  if(!time24) return new Date(y,m-1,d);
+  const [hh,mm] = String(time24).split(':').map(Number);
+  return new Date(y,m-1,d,hh,mm,0,0);
+}
+function format12(date){
+  let h = date.getHours();
+  const m = date.getMinutes();
+  const am = h < 12 ? 'AM' : 'PM';
+  h = h % 12; if(h === 0) h = 12;
+  return `${h}:${pad(m)} ${am}`;
+}
+function ymdFromDate(date){
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
+}
+function startOfMonth(date){
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+function endOfMonth(date){
+  return new Date(date.getFullYear(), date.getMonth()+1, 0);
+}
+
+// ---------- App state ----------
+const state = {
+  currentMonth: new Date(), // visible month (any date within month)
+  events: loadEvents(), // array of event objects
+  notified: loadNotified(), // array of event ids already notified
+  selectedDate: null
+};
+
+// ---------- DOM refs ----------
+const monthLabel = document.getElementById('monthLabel');
+const yearLabel = document.getElementById('yearLabel');
+const calendarGrid = document.getElementById('calendarGrid');
+const weekdayRow = document.getElementById('weekdayRow');
+const todayBtn = document.getElementById('todayBtn');
+const prevMonthBtn = document.getElementById('prevMonthBtn');
+const nextMonthBtn = document.getElementById('nextMonthBtn');
+
+const eventForm = document.getElementById('eventForm');
+const titleInput = document.getElementById('title');
+const dateInput = document.getElementById('date');
+const startTimeInput = document.getElementById('startTime');
+const endTimeInput = document.getElementById('endTime');
+const descInput = document.getElementById('description');
+const reminderSelect = document.getElementById('reminder');
+const eventIdInput = document.getElementById('eventId');
+const clearBtn = document.getElementById('clearBtn');
+
+const upcomingList = document.getElementById('upcomingList');
+const notificationsContainer = document.getElementById('notifications');
+
+// ---------- Render weekday labels ----------
+function renderWeekdays(){
+  weekdayRow.innerHTML = '';
+  for(let i=0;i<7;i++){
+    const el = document.createElement('div');
+    el.textContent = WEEKDAYS[i];
+    weekdayRow.appendChild(el);
+  }
+}
+
+// ---------- Calendar rendering ----------
+function renderCalendar(){
+  calendarGrid.innerHTML = '';
+  const view = state.currentMonth;
+  const first = startOfMonth(view);
+  const last = endOfMonth(view);
+
+  // Show days from previous month to fill week starting Sunday
+  const startDayIdx = first.getDay(); // 0 (Sun) - 6
+  const daysInMonth = last.getDate();
+
+  // Determine date for grid start
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - startDayIdx);
+
+  // Show 6 weeks (6*7 = 42 cells) to keep consistent height
+  const totalCells = 42;
+
+  // Update header
+  const monthName = view.toLocaleString(undefined, {month:'long'});
+  monthLabel.textContent = monthName;
+  yearLabel.textContent = view.getFullYear();
+
+  const todayYMD = ymdFromDate(new Date());
+
+  for(let i=0;i<totalCells;i++){
+    const cellDate = new Date(gridStart);
+    cellDate.setDate(gridStart.getDate() + i);
+    const ymd = ymdFromDate(cellDate);
+    const isCurrentMonth = cellDate.getMonth() === view.getMonth();
+    const dayEl = document.createElement('div');
+    dayEl.className = 'day' + (isCurrentMonth ? '' : ' muted-day');
+    dayEl.setAttribute('data-ymd', ymd);
+    dayEl.setAttribute('role','gridcell');
+    dayEl.setAttribute('aria-label', cellDate.toDateString());
+
+    // If today
+    if(ymd === todayYMD) dayEl.classList.add('today');
+
+    // If selected
+    if(state.selectedDate && state.selectedDate === ymd) dayEl.classList.add('selected');
+
+    // Date number + small marker
+    const num = document.createElement('div');
+    num.className = 'date-num';
+    num.textContent = pad(cellDate.getDate());
+
+    // event count for this day
+    const dayEvents = state.events.filter(ev => ev.date === ymd);
+    if(dayEvents.length){
+      const count = document.createElement('div');
+      count.className = 'event-count';
+      count.textContent = dayEvents.length + (dayEvents.length === 1 ? ' event' : ' events');
+      num.appendChild(count);
+    }
+
+    dayEl.appendChild(num);
+
+    // markers: show up to 3 event badges (title initials) for quick glance
+    if(dayEvents.length){
+      const mk = document.createElement('div');
+      mk.className = 'markers';
+      dayEvents.slice(0,3).forEach(ev=>{
+        const b = document.createElement('span');
+        b.className = 'event-badge';
+        // initials of title
+        const initials = ev.title.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+        b.textContent = initials;
+        b.title = ev.title + ' — ' + format12(ymdToDate(ev.date, ev.startTime));
+        mk.appendChild(b);
+      });
+      dayEl.appendChild(mk);
+    }
+
+    // Click to select day (prefill form)
+    dayEl.addEventListener('click', ()=>{
+      state.selectedDate = ymd;
+      dateInput.value = ymd;
+      // if startTime blank, default to next hour
+      if(!startTimeInput.value){
+        const d = new Date();
+        d.setMinutes(0,0,0);
+        d.setHours(d.getHours() + 1);
+        startTimeInput.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+      }
+      // default end time to start+1h if blank
+      if(!endTimeInput.value && startTimeInput.value){
+        const [hh,mm] = startTimeInput.value.split(':').map(Number);
+        const dd = new Date();
+        dd.setHours(hh+1, mm, 0, 0);
+        endTimeInput.value = pad(dd.getHours()) + ':' + pad(dd.getMinutes());
+      }
+      // rerender to highlight selected
+      renderCalendar();
+    });
+
+    calendarGrid.appendChild(dayEl);
+  }
+}
+
+// ---------- Event management ----------
+function getEventsSorted(){
+  // return events sorted by date/time asc
+  return state.events.slice().sort((a,b)=>{
+    const da = ymdToDate(a.date, a.startTime).getTime();
+    const db = ymdToDate(b.date, b.startTime).getTime();
+    return da - db;
+  });
+}
+
+function renderUpcomingList(){
+  const now = Date.now();
+  const upcoming = getEventsSorted().filter(ev => ymdToDate(ev.date, ev.endTime).getTime() >= now);
+  upcomingList.innerHTML = '';
+  if(upcoming.length === 0){
+    const p = document.createElement('div');
+    p.className = 'muted small';
+    p.textContent = 'No upcoming events.';
+    upcomingList.appendChild(p);
+    return;
+  }
+
+  upcoming.forEach(ev=>{
+    const item = document.createElement('div');
+    item.className = 'event-item';
+
+    const left = document.createElement('div');
+    left.style.width = '64px';
+    left.style.display = 'flex';
+    left.style.flexDirection = 'column';
+    left.style.gap = '6px';
+    left.style.alignItems = 'flex-start';
+
+    const time = document.createElement('div');
+    time.className = 'event-time';
+    time.textContent = format12(ymdToDate(ev.date, ev.startTime));
+    left.appendChild(time);
+
+    const meta = document.createElement('div');
+    meta.className = 'event-meta';
+    const title = document.createElement('div');
+    title.className = 'event-title';
+    title.textContent = ev.title;
+    const when = document.createElement('small');
+    when.className = 'muted small';
+    const d = new Date(ev.date + 'T00:00:00');
+    when.textContent = d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+    const desc = document.createElement('div');
+    desc.className = 'event-desc';
+    desc.textContent = ev.description || '';
+    meta.appendChild(title);
+    meta.appendChild(when);
+    meta.appendChild(desc);
+
+    const actions = document.createElement('div');
+    actions.style.marginLeft = 'auto';
+    actions.style.display = 'flex';
+    actions.style.flexDirection = 'column';
+    actions.style.alignItems = 'flex-end';
+    actions.style.gap = '6px';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', ()=>{
+      populateFormForEdit(ev.id);
+      window.scrollTo({top:0,behavior:'smooth'});
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn ghost';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', ()=>{
+      if(confirm('Delete this event?')) { deleteEvent(ev.id); }
+    });
+
+    actions.appendChild(editBtn);
+    actions.appendChild(delBtn);
+
+    item.appendChild(left);
+    item.appendChild(meta);
+    item.appendChild(actions);
+
+    upcomingList.appendChild(item);
+  });
+}
+
+function addOrUpdateEvent(ev){
+  // validation handled outside
+  if(ev.id){
+    // update existing
+    const idx = state.events.findIndex(x=>x.id === ev.id);
+    if(idx !== -1) state.events[idx] = ev;
+  }else{
+    ev.id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+    state.events.push(ev);
+  }
+  saveEvents(state.events);
+  renderCalendar();
+  renderUpcomingList();
+  // run notification check immediately (in case new event triggers soon)
+  checkNotificationsOnce();
+}
+
+function deleteEvent(id){
+  state.events = state.events.filter(e => e.id !== id);
+  saveEvents(state.events);
+  renderCalendar();
+  renderUpcomingList();
+  // cleanup notified set if exists
+  state.notified = state.notified.filter(x=>x !== id);
+  saveNotified(state.notified);
+}
+
+// Populate form for editing existing event
+function populateFormForEdit(id){
+  const ev = state.events.find(e=>e.id===id);
+  if(!ev) return;
+  eventIdInput.value = ev.id;
+  titleInput.value = ev.title;
+  dateInput.value = ev.date;
+  startTimeInput.value = ev.startTime;
+  endTimeInput.value = ev.endTime;
+  descInput.value = ev.description || '';
+  // reminder is not stored per event in the simple model; keep default
+}
+
+// Clear form
+function clearForm(){
+  eventIdInput.value = '';
+  titleInput.value = '';
+  dateInput.value = '';
+  startTimeInput.value = '';
+  endTimeInput.value = '';
+  descInput.value = '';
+  reminderSelect.value = '10';
+  state.selectedDate = null;
+  renderCalendar();
+}
+
+// ---------- Form submission & validation ----------
+eventForm.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const title = titleInput.value.trim();
+  const date = dateInput.value;
+  const start = startTimeInput.value;
+  const end = endTimeInput.value;
+
+  if(!title || !date || !start || !end){
+    alert('Please complete required fields: title, date, start and end times.');
+    return;
+  }
+
+  // ensure start < end
+  const startDt = ymdToDate(date, start);
+  const endDt = ymdToDate(date, end);
+  if(endDt <= startDt){
+    alert('End time must be after start time.');
+    return;
+  }
+
+  const eventObj = {
+    id: eventIdInput.value || null,
+    title,
+    date,
+    startTime: start,
+    endTime: end,
+    description: descInput.value.trim(),
+    reminderMins: Number(reminderSelect.value)
+  };
+
+  addOrUpdateEvent(eventObj);
+  clearForm();
+});
+
+clearBtn.addEventListener('click', (e)=>{
+  e.preventDefault();
+  clearForm();
+});
+
+// ---------- Navigation ----------
+todayBtn.addEventListener('click', ()=>{
+  state.currentMonth = new Date(); renderCalendar();
+});
+prevMonthBtn.addEventListener('click', ()=>{
+  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
+  renderCalendar();
+});
+nextMonthBtn.addEventListener('click', ()=>{
+  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
+  renderCalendar();
+});
+
+// ---------- Notifications system ----------
+function createToast(ev){
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  const left = document.createElement('div');
+  left.className = 'left';
+  left.textContent = ev.title.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+  const right = document.createElement('div');
+  right.className = 'right';
+
+  const t = document.createElement('div');
+  t.className = 'title';
+  t.textContent = ev.title;
+
+  const when = document.createElement('small');
+  const dt = ymdToDate(ev.date, ev.startTime);
+  when.textContent = `${dt.toLocaleDateString(undefined, {month:'short', day:'numeric'})} • ${format12(dt)}`;
+
+  const desc = document.createElement('div');
+  desc.className = 'muted small';
+  desc.textContent = ev.description || '';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'close';
+  closeBtn.title = 'Close';
+  closeBtn.innerHTML = '&#10005;'; // ×
+  closeBtn.addEventListener('click', ()=>{
+    hideToast(toast);
+  });
+
+  right.appendChild(t);
+  right.appendChild(when);
+  if(ev.description) right.appendChild(desc);
+
+  const topRow = document.createElement('div');
+  topRow.style.display = 'flex';
+  topRow.style.alignItems = 'center';
+  topRow.style.gap = '8px';
+  topRow.appendChild(left);
+  topRow.appendChild(right);
+
+  toast.appendChild(topRow);
+  toast.appendChild(closeBtn);
+  notificationsContainer.appendChild(toast);
+
+  // trigger show
+  requestAnimationFrame(()=>{ toast.classList.add('show'); });
+
+  // auto-dismiss after 5s
+  const auto = setTimeout(()=>{ hideToast(toast); }, 5000);
+
+  // ensure cleanup after transition
+  function hideToast(el){
+    el.classList.remove('show');
+    setTimeout(()=>{ if(el && el.parentNode) el.parentNode.removeChild(el); }, 300);
+    clearTimeout(auto);
+  }
+}
+
+// Main check routine: finds events starting within reminder window and not yet notified
+function checkNotificationsOnce(){
+  const now = Date.now();
+  const events = getEventsSorted();
+  events.forEach(ev=>{
+    // compute notification time: event start minus reminderMins (if stored) or default 10
+    const reminder = (ev.reminderMins !== undefined) ? Number(ev.reminderMins) : 10;
+    const evStart = ymdToDate(ev.date, ev.startTime).getTime();
+    const notifyAt = evStart - (reminder * 60000);
+    // Only notify if notifyAt is within now..now+60s (we run every minute) OR if it's already in the past but within 10 minutes (edge cases)
+    // And ensure we haven't already notified this event (by id)
+    if(notifyAt <= now && evStart >= now && !state.notified.includes(ev.id)){
+      // notify
+      createToast(ev);
+      state.notified.push(ev.id);
+      saveNotified(state.notified);
+    }
+  });
+
+  // Cleanup: remove notified ids for events that are now past their end time (so notified set doesn't grow forever)
+  const stillRelevant = [];
+  state.notified.forEach(id=>{
+    const ev = state.events.find(e=>e.id===id);
+    if(!ev) return; // event deleted -> drop
+    const evEnd = ymdToDate(ev.date, ev.endTime).getTime();
+    if(evEnd > now - (60*1000*60*24)) { // if ended within a day ago keep? but we'll keep if end > now - 24h
+      stillRelevant.push(id);
+    }
+  });
+  state.notified = stillRelevant;
+  saveNotified(state.notified);
+}
+
+// Run check every minute and on load / after adding
+let checkInterval = null;
+function startNotificationLoop(){
+  // run immediate check
+  checkNotificationsOnce();
+  if(checkInterval) clearInterval(checkInterval);
+  checkInterval = setInterval(checkNotificationsOnce, 60*1000); // every minute
+}
+
+// ---------- Initialization ----------
+function init(){
+  renderWeekdays();
+  renderCalendar();
+  renderUpcomingList();
+
+  // set default date inputs to today
+  const now = new Date();
+  dateInput.value = ymdFromDate(now);
+  // set default start time to next hour, end +1 hour
+  const startD = new Date();
+  startD.setMinutes(0,0,0);
+  startD.setHours(startD.getHours()+1);
+  const endD = new Date(startD);
+  endD.setHours(endD.getHours()+1);
+  startTimeInput.value = pad(startD.getHours()) + ':' + pad(startD.getMinutes());
+  endTimeInput.value = pad(endD.getHours()) + ':' + pad(endD.getMinutes());
+
+  // attach listeners for localStorage changes from other tabs
+  window.addEventListener('storage', (e)=>{
+    if(e.key === STORAGE_KEY){
+      state.events = loadEvents();
+      renderCalendar();
+      renderUpcomingList();
+    }
+    if(e.key === NOTIFIED_KEY){
+      state.notified = loadNotified();
+    }
+  });
+
+  startNotificationLoop();
+}
+
+// populate calendar initially
+init();
+
+// Expose certain functions for debugging in console (optional)
+window.ScheduleMaster = {
+  state,
+  addEvent: (ev)=>{ addOrUpdateEvent(ev); },
+  deleteEvent,
+  renderCalendar,
+  renderUpcomingList
+};
+</script>
+</body>
+</html>
