@@ -3,25 +3,21 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>ScheduleMaster — Responsive Calendar & Notification System</title>
+<title>ScheduleMaster — Responsive Calendar & Notification System (School Prototype)</title>
 
 <!--
-ScheduleMaster - Single-file implementation
-Features:
-- Monthly calendar with prev/next/today navigation
-- Click a day to prefill the event form
-- Event creation with title, date, start/end times, description
-- Events persisted in localStorage
-- Upcoming events list (chronological)
-- Time-based notifications: checks every minute; alerts 10 minutes before event
-- Slide-in notification panel with auto-dismiss after 5s & manual close
-- Responsive (mobile-first), breakpoints for tablet & desktop
-- No external dependencies (icons are inline SVG)
-- Uses CSS Grid/Flexbox and CSS variables for theme
-- 12-hour time formatting for display
+ScheduleMaster - Single-file implementation (updated)
+Features added:
+- Role selector (Teacher / Student) in header (saved to localStorage)
+- Teacher: add/edit/delete events. Student: read-only view.
+- Dark / Light theme toggle (saved to localStorage)
+- Events store 'createdBy' attribute
+- No sound for notifications; toast slide-in only
+- Refactored JS structure, comments, and role-based UI behavior
 -->
 
 <style>
+  /* --- Theme variables (light defaults) --- */
   :root{
     --primary:#4361ee; /* Professional blue */
     --secondary:#7209b7; /* Accent purple */
@@ -29,11 +25,21 @@ Features:
     --warning:#f72585; /* Alert pink */
     --bg:#f5f7fb;
     --card:#ffffff;
-    --muted:#9aa4bb;
+    --muted:#6b7280;
+    --text:#0f1724;
     --accent-contrast:#ffffff;
     --shadow: 0 6px 18px rgba(15,23,42,0.06);
     --radius:12px;
     --font-stack:"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* --- Dark theme overrides (added/removed via body.classList) --- */
+  body.dark {
+    --bg:#0b1220;
+    --card:#0f1724;
+    --muted:#9aa4bb;
+    --text:#e6eef8;
+    --shadow: 0 8px 26px rgba(0,0,0,0.6);
   }
 
   /* Mobile-first layout */
@@ -41,12 +47,13 @@ Features:
   body{
     margin:0;
     font-family:var(--font-stack);
-    background:linear-gradient(180deg, var(--bg), #ffffff);
-    color:#0f1724;
+    background:linear-gradient(180deg, var(--bg), rgba(0,0,0,0));
+    color:var(--text);
     -webkit-font-smoothing:antialiased;
     -moz-osx-font-smoothing:grayscale;
     line-height:1.35;
     padding:16px;
+    transition: background .18s ease, color .18s ease;
   }
 
   .app{
@@ -82,10 +89,14 @@ Features:
   .btn{
     display:inline-flex;gap:8px;align-items:center;padding:8px 12px;border-radius:10px;
     background:var(--card);border:1px solid rgba(15,23,42,0.06);cursor:pointer;font-weight:600;
-    box-shadow:var(--shadow);
+    box-shadow:var(--shadow);color:var(--text);
   }
   .btn.primary{background:var(--primary);color:var(--accent-contrast);border:none}
   .btn.ghost{background:transparent;border:1px solid rgba(15,23,42,0.06)}
+
+  /* Role select & theme toggle */
+  .role-select{padding:8px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);background:transparent;color:var(--text)}
+  .theme-toggle{display:inline-flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);background:transparent;cursor:pointer}
 
   /* Main layout: calendar + sidebar form/list */
   .main{
@@ -96,6 +107,7 @@ Features:
 
   .card{
     background:var(--card);padding:14px;border-radius:var(--radius);box-shadow:var(--shadow);
+    transition: background .18s ease, color .18s ease;
   }
 
   /* Calendar header controls */
@@ -132,9 +144,10 @@ Features:
     display:flex;flex-direction:column;justify-content:flex-start;
     transition:transform .12s ease, box-shadow .12s ease;
     border:1px solid rgba(15,23,42,0.03);
+    color:var(--text);
   }
   .day:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(15,23,42,0.06)}
-  .muted-day{color:rgba(15,23,42,0.28);background:transparent}
+  .muted-day{color:rgba(15,23,42,0.28);background:transparent;opacity:.6}
   .today{
     outline:3px solid rgba(67,97,238,0.12);
     box-shadow:inset 0 -3px 0 rgba(67,97,238,0.05);
@@ -165,18 +178,23 @@ Features:
   .field{display:flex;flex-direction:column;gap:6px}
   label{font-size:13px;color:var(--muted)}
   input[type="text"], input[type="date"], input[type="time"], textarea, select{
-    padding:10px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);font-size:14px;background:transparent;
+    padding:10px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);font-size:14px;background:transparent;color:var(--text);
   }
   textarea{min-height:84px;resize:vertical;padding-top:10px}
   .row{display:flex;gap:8px}
   .row .field{flex:1}
 
   .event-list{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto;padding-right:6px}
-  .event-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:10px;border:1px solid rgba(15,23,42,0.03)}
+  .event-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:10px;border:1px solid rgba(15,23,42,0.03);background:linear-gradient(180deg,transparent,transparent)}
   .event-meta{display:flex;flex-direction:column;gap:6px}
   .event-time{font-weight:700;color:var(--primary)}
   .event-title{font-weight:700}
   .event-desc{color:var(--muted);font-size:13px}
+
+  .tag {
+    font-size:11px;padding:4px 8px;border-radius:999px;background:rgba(15,23,42,0.04);color:var(--muted);
+    margin-left:6px;
+  }
 
   /* Notification panel (slide-in) */
   .notifications{
@@ -198,6 +216,7 @@ Features:
     transform:translateY(20px) scale(.98);
     opacity:0;transition:transform .25s cubic-bezier(.2,.9,.2,1),opacity .25s;
     display:flex;gap:10px;align-items:flex-start;
+    color:var(--text);
   }
   .toast.show{transform:none;opacity:1}
   .toast .left{width:46px;height:46px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
@@ -226,6 +245,7 @@ Features:
   .hidden{display:none}
   .form-actions{display:flex;gap:8px;justify-content:flex-end}
   .pill{padding:6px 10px;border-radius:999px;background:rgba(15,23,42,0.03);font-weight:700;font-size:13px}
+  .disabled { opacity: .5; pointer-events: none; filter: grayscale(.1); }
 </style>
 </head>
 <body>
@@ -235,10 +255,20 @@ Features:
         <div class="logo">SM</div>
         <div>
           <h1>ScheduleMaster</h1>
-          <p>Responsive calendar • Notifications • localStorage</p>
+          <p>School calendar • Teacher & Student modes</p>
         </div>
       </div>
+
       <div class="header-actions">
+        <!-- Role selector (always visible) -->
+        <select id="roleSelect" class="role-select" aria-label="Choose role">
+          <option value="student">Student</option>
+          <option value="teacher">Teacher</option>
+        </select>
+
+        <!-- Theme toggle -->
+        <button id="themeToggle" class="theme-toggle" title="Toggle theme">🌙</button>
+
         <div class="pill small muted">Mobile • Tablet • Desktop</div>
         <button class="btn primary" id="todayBtn" title="Go to today">Today</button>
       </div>
@@ -269,7 +299,7 @@ Features:
 
       <!-- Sidebar: Event form + upcoming events -->
       <aside class="sidebar">
-        <div class="card">
+        <div class="card" id="formCard">
           <h3 style="margin:0 0 8px 0">Add / Edit Event</h3>
 
           <form id="eventForm" class="event-form" autocomplete="off">
@@ -311,11 +341,12 @@ Features:
               <textarea id="description" placeholder="Optional details..."></textarea>
             </div>
 
-            <div class="form-actions">
+            <div class="form-actions" id="formActions">
               <button type="button" class="btn" id="clearBtn">Clear</button>
               <button type="submit" class="btn primary" id="saveBtn">Save Event</button>
             </div>
             <p class="muted small" style="margin:6px 0 0 0">* Required fields — times are local and displayed in 12-hour format.</p>
+            <p id="roleNotice" class="muted small" style="margin:6px 0 0 0"></p>
           </form>
         </div>
 
@@ -333,45 +364,41 @@ Features:
   <div class="notifications" id="notifications" aria-live="assertive" aria-atomic="true"></div>
 
 <script>
-/*
-ScheduleMaster main JS
-- Handles calendar rendering, event CRUD, localStorage, notifications
-- Comments inline for maintainability
-*/
+/* ===========================
+   ScheduleMaster (School) JS
+   - Role selector (teacher/student)
+   - Dark/light theme toggle
+   - Event CRUD with createdBy
+   - Notifications (silent toast)
+   - localStorage persistence
+   =========================== */
 
-// --------- Storage keys & helpers ----------
+/* -----------------------
+   Storage keys & helpers
+   ----------------------- */
 const STORAGE_KEY = 'schedulemaster_events_v1';
-const NOTIFIED_KEY = 'schedulemaster_notified_v1'; // store notified event ids to avoid duplicates
+const NOTIFIED_KEY = 'schedulemaster_notified_v1';
+const ROLE_KEY = 'schedulemaster_role_v1';
+const THEME_KEY = 'schedulemaster_theme_v1'; // 'light' or 'dark'
 
-function loadEvents(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  }catch(e){
-    console.error('Failed to parse events from storage', e);
-    return [];
-  }
-}
-function saveEvents(events){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-}
-function loadNotified(){
-  try{
-    const raw = localStorage.getItem(NOTIFIED_KEY);
-    return raw ? JSON.parse(raw) : [];
-  }catch(e){
-    return [];
-  }
-}
-function saveNotified(arr){
-  localStorage.setItem(NOTIFIED_KEY, JSON.stringify(arr || []));
-}
+function loadEvents(){ try{ const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ console.error('Failed to parse events', e); return []; } }
+function saveEvents(events){ localStorage.setItem(STORAGE_KEY, JSON.stringify(events)); }
 
-// ---------- Date helpers ----------
+function loadNotified(){ try{ const raw = localStorage.getItem(NOTIFIED_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; } }
+function saveNotified(arr){ localStorage.setItem(NOTIFIED_KEY, JSON.stringify(arr || [])); }
+
+function loadRole(){ return localStorage.getItem(ROLE_KEY) || 'student'; }
+function saveRole(role){ localStorage.setItem(ROLE_KEY, role); }
+
+function loadTheme(){ return localStorage.getItem(THEME_KEY) || 'light'; }
+function saveTheme(t){ localStorage.setItem(THEME_KEY, t); }
+
+/* -----------------------
+   Date helpers
+   ----------------------- */
 const WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-function pad(n){return n.toString().padStart(2,'0');}
+function pad(n){ return n.toString().padStart(2,'0'); }
 function ymdToDate(ymd, time24){
-  // ymd: "YYYY-MM-DD", time24: "HH:MM" (24h). returns JS Date in local tz
   const [y,m,d] = String(ymd).split('-').map(Number);
   if(!time24) return new Date(y,m-1,d);
   const [hh,mm] = String(time24).split(':').map(Number);
@@ -384,79 +411,123 @@ function format12(date){
   h = h % 12; if(h === 0) h = 12;
   return `${h}:${pad(m)} ${am}`;
 }
-function ymdFromDate(date){
-  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
-}
-function startOfMonth(date){
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-function endOfMonth(date){
-  return new Date(date.getFullYear(), date.getMonth()+1, 0);
-}
+function ymdFromDate(date){ return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`; }
+function startOfMonth(date){ return new Date(date.getFullYear(), date.getMonth(), 1); }
+function endOfMonth(date){ return new Date(date.getFullYear(), date.getMonth()+1, 0); }
 
-// ---------- App state ----------
+/* -----------------------
+   App State & DOM refs
+   ----------------------- */
 const state = {
-  currentMonth: new Date(), // visible month (any date within month)
-  events: loadEvents(), // array of event objects
-  notified: loadNotified(), // array of event ids already notified
-  selectedDate: null
+  currentMonth: new Date(),
+  events: loadEvents(),
+  notified: loadNotified(),
+  selectedDate: null,
+  role: loadRole(), // 'teacher' or 'student'
+  theme: loadTheme() // 'light' or 'dark'
 };
 
-// ---------- DOM refs ----------
-const monthLabel = document.getElementById('monthLabel');
-const yearLabel = document.getElementById('yearLabel');
-const calendarGrid = document.getElementById('calendarGrid');
-const weekdayRow = document.getElementById('weekdayRow');
-const todayBtn = document.getElementById('todayBtn');
-const prevMonthBtn = document.getElementById('prevMonthBtn');
-const nextMonthBtn = document.getElementById('nextMonthBtn');
+const refs = {
+  monthLabel: document.getElementById('monthLabel'),
+  yearLabel: document.getElementById('yearLabel'),
+  calendarGrid: document.getElementById('calendarGrid'),
+  weekdayRow: document.getElementById('weekdayRow'),
+  todayBtn: document.getElementById('todayBtn'),
+  prevMonthBtn: document.getElementById('prevMonthBtn'),
+  nextMonthBtn: document.getElementById('nextMonthBtn'),
+  roleSelect: document.getElementById('roleSelect'),
+  themeToggle: document.getElementById('themeToggle'),
+  eventForm: document.getElementById('eventForm'),
+  titleInput: document.getElementById('title'),
+  dateInput: document.getElementById('date'),
+  startTimeInput: document.getElementById('startTime'),
+  endTimeInput: document.getElementById('endTime'),
+  descInput: document.getElementById('description'),
+  reminderSelect: document.getElementById('reminder'),
+  eventIdInput: document.getElementById('eventId'),
+  clearBtn: document.getElementById('clearBtn'),
+  upcomingList: document.getElementById('upcomingList'),
+  notificationsContainer: document.getElementById('notifications'),
+  formActions: document.getElementById('formActions'),
+  roleNotice: document.getElementById('roleNotice'),
+  formCard: document.getElementById('formCard')
+};
 
-const eventForm = document.getElementById('eventForm');
-const titleInput = document.getElementById('title');
-const dateInput = document.getElementById('date');
-const startTimeInput = document.getElementById('startTime');
-const endTimeInput = document.getElementById('endTime');
-const descInput = document.getElementById('description');
-const reminderSelect = document.getElementById('reminder');
-const eventIdInput = document.getElementById('eventId');
-const clearBtn = document.getElementById('clearBtn');
+/* -----------------------
+   Initialization: theme + role UI
+   ----------------------- */
+function applyTheme(theme){
+  if(theme === 'dark') document.body.classList.add('dark');
+  else document.body.classList.remove('dark');
+  refs.themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+  state.theme = theme;
+  saveTheme(theme);
+}
+function applyRole(role){
+  state.role = role;
+  saveRole(role);
+  refs.roleSelect.value = role;
+  // If student => disable inputs & actions; teacher => enable
+  const isStudent = (role === 'student');
+  // disable inputs
+  const formElements = refs.eventForm.querySelectorAll('input, textarea, select, button');
+  formElements.forEach(el=>{
+    // keep the role select and theme toggle enabled; only disable form inputs and form buttons
+    if(el === refs.roleSelect || el === refs.themeToggle) return;
+    // For buttons inside form only
+    if(el.tagName === 'BUTTON' && !refs.eventForm.contains(el)) return;
+  });
 
-const upcomingList = document.getElementById('upcomingList');
-const notificationsContainer = document.getElementById('notifications');
+  // Visual & functional changes
+  if(isStudent){
+    refs.formCard.classList.add('disabled');
+    refs.roleNotice.textContent = 'You are viewing as a STUDENT — events are read-only.';
+  } else {
+    refs.formCard.classList.remove('disabled');
+    refs.roleNotice.textContent = 'You are viewing as a TEACHER — you can add, edit, and delete events.';
+  }
 
-// ---------- Render weekday labels ----------
+  // Enable/disable the actual form fields and action buttons
+  const disableFields = isStudent;
+  ['title','date','startTime','endTime','description','reminder','clearBtn','saveBtn'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(disableFields){
+      el.setAttribute('disabled','disabled');
+    } else {
+      el.removeAttribute('disabled');
+    }
+  });
+
+  // Re-render upcoming list and calendar so buttons (edit/delete) appear/hide
+  renderCalendar();
+  renderUpcomingList();
+}
+
+/* -----------------------
+   Calendar rendering
+   ----------------------- */
 function renderWeekdays(){
-  weekdayRow.innerHTML = '';
+  refs.weekdayRow.innerHTML = '';
   for(let i=0;i<7;i++){
     const el = document.createElement('div');
     el.textContent = WEEKDAYS[i];
-    weekdayRow.appendChild(el);
+    refs.weekdayRow.appendChild(el);
   }
 }
 
-// ---------- Calendar rendering ----------
 function renderCalendar(){
-  calendarGrid.innerHTML = '';
+  refs.calendarGrid.innerHTML = '';
   const view = state.currentMonth;
   const first = startOfMonth(view);
   const last = endOfMonth(view);
-
-  // Show days from previous month to fill week starting Sunday
-  const startDayIdx = first.getDay(); // 0 (Sun) - 6
-  const daysInMonth = last.getDate();
-
-  // Determine date for grid start
+  const startDayIdx = first.getDay();
   const gridStart = new Date(first);
   gridStart.setDate(first.getDate() - startDayIdx);
-
-  // Show 6 weeks (6*7 = 42 cells) to keep consistent height
   const totalCells = 42;
-
-  // Update header
   const monthName = view.toLocaleString(undefined, {month:'long'});
-  monthLabel.textContent = monthName;
-  yearLabel.textContent = view.getFullYear();
-
+  refs.monthLabel.textContent = monthName;
+  refs.yearLabel.textContent = view.getFullYear();
   const todayYMD = ymdFromDate(new Date());
 
   for(let i=0;i<totalCells;i++){
@@ -470,18 +541,13 @@ function renderCalendar(){
     dayEl.setAttribute('role','gridcell');
     dayEl.setAttribute('aria-label', cellDate.toDateString());
 
-    // If today
     if(ymd === todayYMD) dayEl.classList.add('today');
-
-    // If selected
     if(state.selectedDate && state.selectedDate === ymd) dayEl.classList.add('selected');
 
-    // Date number + small marker
     const num = document.createElement('div');
     num.className = 'date-num';
     num.textContent = pad(cellDate.getDate());
 
-    // event count for this day
     const dayEvents = state.events.filter(ev => ev.date === ymd);
     if(dayEvents.length){
       const count = document.createElement('div');
@@ -489,18 +555,15 @@ function renderCalendar(){
       count.textContent = dayEvents.length + (dayEvents.length === 1 ? ' event' : ' events');
       num.appendChild(count);
     }
-
     dayEl.appendChild(num);
 
-    // markers: show up to 3 event badges (title initials) for quick glance
     if(dayEvents.length){
       const mk = document.createElement('div');
       mk.className = 'markers';
       dayEvents.slice(0,3).forEach(ev=>{
         const b = document.createElement('span');
         b.className = 'event-badge';
-        // initials of title
-        const initials = ev.title.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+        const initials = ev.title.split(' ').map(s=>s[0]||'').slice(0,2).join('').toUpperCase();
         b.textContent = initials;
         b.title = ev.title + ' — ' + format12(ymdToDate(ev.date, ev.startTime));
         mk.appendChild(b);
@@ -508,51 +571,42 @@ function renderCalendar(){
       dayEl.appendChild(mk);
     }
 
-    // Click to select day (prefill form)
     dayEl.addEventListener('click', ()=>{
       state.selectedDate = ymd;
-      dateInput.value = ymd;
-      // if startTime blank, default to next hour
-      if(!startTimeInput.value){
+      refs.dateInput.value = ymd;
+      if(!refs.startTimeInput.value){
         const d = new Date();
         d.setMinutes(0,0,0);
         d.setHours(d.getHours() + 1);
-        startTimeInput.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
+        refs.startTimeInput.value = pad(d.getHours()) + ':' + pad(d.getMinutes());
       }
-      // default end time to start+1h if blank
-      if(!endTimeInput.value && startTimeInput.value){
-        const [hh,mm] = startTimeInput.value.split(':').map(Number);
+      if(!refs.endTimeInput.value && refs.startTimeInput.value){
+        const [hh,mm] = refs.startTimeInput.value.split(':').map(Number);
         const dd = new Date();
         dd.setHours(hh+1, mm, 0, 0);
-        endTimeInput.value = pad(dd.getHours()) + ':' + pad(dd.getMinutes());
+        refs.endTimeInput.value = pad(dd.getHours()) + ':' + pad(dd.getMinutes());
       }
-      // rerender to highlight selected
       renderCalendar();
     });
 
-    calendarGrid.appendChild(dayEl);
+    refs.calendarGrid.appendChild(dayEl);
   }
 }
 
-// ---------- Event management ----------
-function getEventsSorted(){
-  // return events sorted by date/time asc
-  return state.events.slice().sort((a,b)=>{
-    const da = ymdToDate(a.date, a.startTime).getTime();
-    const db = ymdToDate(b.date, b.startTime).getTime();
-    return da - db;
-  });
-}
+/* -----------------------
+   Event list & CRUD
+   ----------------------- */
+function getEventsSorted(){ return state.events.slice().sort((a,b)=> ymdToDate(a.date,a.startTime).getTime() - ymdToDate(b.date,b.startTime).getTime()); }
 
 function renderUpcomingList(){
   const now = Date.now();
   const upcoming = getEventsSorted().filter(ev => ymdToDate(ev.date, ev.endTime).getTime() >= now);
-  upcomingList.innerHTML = '';
+  refs.upcomingList.innerHTML = '';
   if(upcoming.length === 0){
     const p = document.createElement('div');
     p.className = 'muted small';
     p.textContent = 'No upcoming events.';
-    upcomingList.appendChild(p);
+    refs.upcomingList.appendChild(p);
     return;
   }
 
@@ -584,9 +638,15 @@ function renderUpcomingList(){
     const desc = document.createElement('div');
     desc.className = 'event-desc';
     desc.textContent = ev.description || '';
+    // createdBy tag
+    const creatorTag = document.createElement('span');
+    creatorTag.className = 'tag';
+    creatorTag.textContent = ev.createdBy ? `By: ${ev.createdBy}` : 'By: unknown';
+
     meta.appendChild(title);
     meta.appendChild(when);
     meta.appendChild(desc);
+    meta.appendChild(creatorTag);
 
     const actions = document.createElement('div');
     actions.style.marginLeft = 'auto';
@@ -595,46 +655,51 @@ function renderUpcomingList(){
     actions.style.alignItems = 'flex-end';
     actions.style.gap = '6px';
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn';
-    editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', ()=>{
-      populateFormForEdit(ev.id);
-      window.scrollTo({top:0,behavior:'smooth'});
-    });
+    // Edit & Delete only visible to teacher role
+    if(state.role === 'teacher'){
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', ()=>{
+        populateFormForEdit(ev.id);
+        window.scrollTo({top:0,behavior:'smooth'});
+      });
 
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn ghost';
-    delBtn.textContent = 'Delete';
-    delBtn.addEventListener('click', ()=>{
-      if(confirm('Delete this event?')) { deleteEvent(ev.id); }
-    });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn ghost';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', ()=>{
+        if(confirm('Delete this event?')) { deleteEvent(ev.id); }
+      });
 
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+    } else {
+      const viewNote = document.createElement('div');
+      viewNote.className = 'muted small';
+      viewNote.textContent = 'Read-only';
+      actions.appendChild(viewNote);
+    }
 
     item.appendChild(left);
     item.appendChild(meta);
     item.appendChild(actions);
 
-    upcomingList.appendChild(item);
+    refs.upcomingList.appendChild(item);
   });
 }
 
 function addOrUpdateEvent(ev){
-  // validation handled outside
   if(ev.id){
-    // update existing
     const idx = state.events.findIndex(x=>x.id === ev.id);
     if(idx !== -1) state.events[idx] = ev;
-  }else{
+  } else {
     ev.id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
     state.events.push(ev);
   }
   saveEvents(state.events);
   renderCalendar();
   renderUpcomingList();
-  // run notification check immediately (in case new event triggers soon)
   checkNotificationsOnce();
 }
 
@@ -643,51 +708,42 @@ function deleteEvent(id){
   saveEvents(state.events);
   renderCalendar();
   renderUpcomingList();
-  // cleanup notified set if exists
   state.notified = state.notified.filter(x=>x !== id);
   saveNotified(state.notified);
 }
 
-// Populate form for editing existing event
 function populateFormForEdit(id){
-  const ev = state.events.find(e=>e.id===id);
+  const ev = state.events.find(e => e.id === id);
   if(!ev) return;
-  eventIdInput.value = ev.id;
-  titleInput.value = ev.title;
-  dateInput.value = ev.date;
-  startTimeInput.value = ev.startTime;
-  endTimeInput.value = ev.endTime;
-  descInput.value = ev.description || '';
-  // reminder is not stored per event in the simple model; keep default
+  refs.eventIdInput.value = ev.id;
+  refs.titleInput.value = ev.title;
+  refs.dateInput.value = ev.date;
+  refs.startTimeInput.value = ev.startTime;
+  refs.endTimeInput.value = ev.endTime;
+  refs.descInput.value = ev.description || '';
+  if(ev.reminderMins !== undefined) refs.reminderSelect.value = String(ev.reminderMins);
 }
 
-// Clear form
-function clearForm(){
-  eventIdInput.value = '';
-  titleInput.value = '';
-  dateInput.value = '';
-  startTimeInput.value = '';
-  endTimeInput.value = '';
-  descInput.value = '';
-  reminderSelect.value = '10';
-  state.selectedDate = null;
-  renderCalendar();
-}
-
-// ---------- Form submission & validation ----------
-eventForm.addEventListener('submit', (e)=>{
+/* -----------------------
+   Form handling & validation
+   ----------------------- */
+refs.eventForm.addEventListener('submit', (e)=>{
   e.preventDefault();
-  const title = titleInput.value.trim();
-  const date = dateInput.value;
-  const start = startTimeInput.value;
-  const end = endTimeInput.value;
+  if(state.role !== 'teacher'){
+    alert('Only teachers can create or edit events.');
+    return;
+  }
+
+  const title = refs.titleInput.value.trim();
+  const date = refs.dateInput.value;
+  const start = refs.startTimeInput.value;
+  const end = refs.endTimeInput.value;
 
   if(!title || !date || !start || !end){
     alert('Please complete required fields: title, date, start and end times.');
     return;
   }
 
-  // ensure start < end
   const startDt = ymdToDate(date, start);
   const endDt = ymdToDate(date, end);
   if(endDt <= startDt){
@@ -696,66 +752,58 @@ eventForm.addEventListener('submit', (e)=>{
   }
 
   const eventObj = {
-    id: eventIdInput.value || null,
+    id: refs.eventIdInput.value || null,
     title,
     date,
     startTime: start,
     endTime: end,
-    description: descInput.value.trim(),
-    reminderMins: Number(reminderSelect.value)
+    description: refs.descInput.value.trim(),
+    reminderMins: Number(refs.reminderSelect.value),
+    createdBy: state.role // teacher or student (teacher in this case)
   };
 
   addOrUpdateEvent(eventObj);
   clearForm();
 });
 
-clearBtn.addEventListener('click', (e)=>{
-  e.preventDefault();
-  clearForm();
-});
-
-// ---------- Navigation ----------
-todayBtn.addEventListener('click', ()=>{
-  state.currentMonth = new Date(); renderCalendar();
-});
-prevMonthBtn.addEventListener('click', ()=>{
-  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
+function clearForm(){
+  refs.eventIdInput.value = '';
+  refs.titleInput.value = '';
+  refs.dateInput.value = '';
+  refs.startTimeInput.value = '';
+  refs.endTimeInput.value = '';
+  refs.descInput.value = '';
+  refs.reminderSelect.value = '10';
+  state.selectedDate = null;
   renderCalendar();
-});
-nextMonthBtn.addEventListener('click', ()=>{
-  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
-  renderCalendar();
-});
+}
 
-// ---------- Notifications system ----------
+/* -----------------------
+   Navigation controls
+   ----------------------- */
+refs.todayBtn.addEventListener('click', ()=>{ state.currentMonth = new Date(); renderCalendar(); });
+refs.prevMonthBtn.addEventListener('click', ()=>{ state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1); renderCalendar(); });
+refs.nextMonthBtn.addEventListener('click', ()=>{ state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1); renderCalendar(); });
+
+/* -----------------------
+   Notifications (silent toasts)
+   ----------------------- */
 function createToast(ev){
   const toast = document.createElement('div');
   toast.className = 'toast';
   const left = document.createElement('div');
   left.className = 'left';
-  left.textContent = ev.title.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase();
+  left.textContent = ev.title.split(' ').map(s=>s[0]||'').slice(0,2).join('').toUpperCase();
   const right = document.createElement('div');
   right.className = 'right';
-
-  const t = document.createElement('div');
-  t.className = 'title';
-  t.textContent = ev.title;
-
+  const t = document.createElement('div'); t.className = 'title'; t.textContent = ev.title;
   const when = document.createElement('small');
   const dt = ymdToDate(ev.date, ev.startTime);
   when.textContent = `${dt.toLocaleDateString(undefined, {month:'short', day:'numeric'})} • ${format12(dt)}`;
+  const desc = document.createElement('div'); desc.className = 'muted small'; desc.textContent = ev.description || '';
 
-  const desc = document.createElement('div');
-  desc.className = 'muted small';
-  desc.textContent = ev.description || '';
-
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'close';
-  closeBtn.title = 'Close';
-  closeBtn.innerHTML = '&#10005;'; // ×
-  closeBtn.addEventListener('click', ()=>{
-    hideToast(toast);
-  });
+  const closeBtn = document.createElement('button'); closeBtn.className = 'close'; closeBtn.title = 'Close'; closeBtn.innerHTML = '&#10005;';
+  closeBtn.addEventListener('click', ()=>{ hideToast(toast); });
 
   right.appendChild(t);
   right.appendChild(when);
@@ -770,15 +818,11 @@ function createToast(ev){
 
   toast.appendChild(topRow);
   toast.appendChild(closeBtn);
-  notificationsContainer.appendChild(toast);
+  refs.notificationsContainer.appendChild(toast);
 
-  // trigger show
   requestAnimationFrame(()=>{ toast.classList.add('show'); });
 
-  // auto-dismiss after 5s
   const auto = setTimeout(()=>{ hideToast(toast); }, 5000);
-
-  // ensure cleanup after transition
   function hideToast(el){
     el.classList.remove('show');
     setTimeout(()=>{ if(el && el.parentNode) el.parentNode.removeChild(el); }, 300);
@@ -786,85 +830,87 @@ function createToast(ev){
   }
 }
 
-// Main check routine: finds events starting within reminder window and not yet notified
 function checkNotificationsOnce(){
   const now = Date.now();
   const events = getEventsSorted();
   events.forEach(ev=>{
-    // compute notification time: event start minus reminderMins (if stored) or default 10
     const reminder = (ev.reminderMins !== undefined) ? Number(ev.reminderMins) : 10;
     const evStart = ymdToDate(ev.date, ev.startTime).getTime();
     const notifyAt = evStart - (reminder * 60000);
-    // Only notify if notifyAt is within now..now+60s (we run every minute) OR if it's already in the past but within 10 minutes (edge cases)
-    // And ensure we haven't already notified this event (by id)
     if(notifyAt <= now && evStart >= now && !state.notified.includes(ev.id)){
-      // notify
       createToast(ev);
       state.notified.push(ev.id);
       saveNotified(state.notified);
     }
   });
 
-  // Cleanup: remove notified ids for events that are now past their end time (so notified set doesn't grow forever)
+  // cleanup notified set (keep IDs for recent events only)
   const stillRelevant = [];
   state.notified.forEach(id=>{
     const ev = state.events.find(e=>e.id===id);
-    if(!ev) return; // event deleted -> drop
+    if(!ev) return;
     const evEnd = ymdToDate(ev.date, ev.endTime).getTime();
-    if(evEnd > now - (60*1000*60*24)) { // if ended within a day ago keep? but we'll keep if end > now - 24h
-      stillRelevant.push(id);
-    }
+    if(evEnd > now - (60*1000*60*24)) stillRelevant.push(id);
   });
   state.notified = stillRelevant;
   saveNotified(state.notified);
 }
 
-// Run check every minute and on load / after adding
 let checkInterval = null;
 function startNotificationLoop(){
-  // run immediate check
   checkNotificationsOnce();
   if(checkInterval) clearInterval(checkInterval);
-  checkInterval = setInterval(checkNotificationsOnce, 60*1000); // every minute
+  checkInterval = setInterval(checkNotificationsOnce, 60*1000);
 }
 
-// ---------- Initialization ----------
+/* -----------------------
+   UI wiring: role + theme selectors
+   ----------------------- */
+refs.roleSelect.addEventListener('change', (e)=> applyRole(e.target.value) );
+refs.themeToggle.addEventListener('click', ()=>{
+  const newTheme = state.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(newTheme);
+});
+
+/* -----------------------
+   Initialization
+   ----------------------- */
 function init(){
+  // Render static pieces
   renderWeekdays();
   renderCalendar();
   renderUpcomingList();
 
-  // set default date inputs to today
+  // set default date & times
   const now = new Date();
-  dateInput.value = ymdFromDate(now);
-  // set default start time to next hour, end +1 hour
+  refs.dateInput.value = ymdFromDate(now);
   const startD = new Date();
   startD.setMinutes(0,0,0);
   startD.setHours(startD.getHours()+1);
   const endD = new Date(startD);
   endD.setHours(endD.getHours()+1);
-  startTimeInput.value = pad(startD.getHours()) + ':' + pad(startD.getMinutes());
-  endTimeInput.value = pad(endD.getHours()) + ':' + pad(endD.getMinutes());
+  refs.startTimeInput.value = pad(startD.getHours()) + ':' + pad(startD.getMinutes());
+  refs.endTimeInput.value = pad(endD.getHours()) + ':' + pad(endD.getMinutes());
 
-  // attach listeners for localStorage changes from other tabs
+  // apply saved theme & role
+  applyTheme(state.theme);
+  applyRole(state.role);
+
+  // listen to storage events (sync across tabs)
   window.addEventListener('storage', (e)=>{
-    if(e.key === STORAGE_KEY){
-      state.events = loadEvents();
-      renderCalendar();
-      renderUpcomingList();
-    }
-    if(e.key === NOTIFIED_KEY){
-      state.notified = loadNotified();
-    }
+    if(e.key === STORAGE_KEY){ state.events = loadEvents(); renderCalendar(); renderUpcomingList(); }
+    if(e.key === NOTIFIED_KEY){ state.notified = loadNotified(); }
+    if(e.key === ROLE_KEY){ state.role = loadRole(); applyRole(state.role); }
+    if(e.key === THEME_KEY){ state.theme = loadTheme(); applyTheme(state.theme); }
   });
 
+  // start notification loop
   startNotificationLoop();
 }
 
-// populate calendar initially
-init();
-
-// Expose certain functions for debugging in console (optional)
+/* -----------------------
+   Expose some helpers for debugging
+   ----------------------- */
 window.ScheduleMaster = {
   state,
   addEvent: (ev)=>{ addOrUpdateEvent(ev); },
@@ -872,6 +918,12 @@ window.ScheduleMaster = {
   renderCalendar,
   renderUpcomingList
 };
+
+/* -----------------------
+   Start app
+   ----------------------- */
+init();
+
 </script>
 </body>
 </html>
